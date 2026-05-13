@@ -157,3 +157,252 @@ function drawBarChart(data) {
     .text("Avg. Depression Score");
 }
 
+//  VIEW 2 – ALLUVIAL DIAGRAM  (advanced)
+//  Flows: Genre → Daily Hours bucket → Music Effect
+function drawAlluvial(data) {
+  const valid = data.filter(d =>
+    d.effect === "Improve" || d.effect === "No effect" || d.effect === "Worsen"
+  );
+
+  function hoursBucket(h) {
+    if (h < 2)  return "< 2 hrs";
+    if (h < 4)  return "2–4 hrs";
+    if (h < 6)  return "4–6 hrs";
+    if (h < 8)  return "6–8 hrs";
+    return "8+ hrs";
+  }
+  const HOUR_ORDER   = ["< 2 hrs", "2–4 hrs", "4–6 hrs", "6–8 hrs", "8+ hrs"];
+  const EFFECT_ORDER = ["Improve", "No effect", "Worsen"];
+
+  // Effect outcome colors (categorical: good / neutral / bad)
+  const EFFECT_COLOR = {
+    "Improve":   "#10E81C",
+    "No effect": "#aaa",
+    "Worsen":    "#FF0000",
+  };
+
+  // Genre → Hours ribbon color: monochromatic blue shades
+  // We map each genre to a shade of blue by index
+  const genres = [...new Set(valid.map(d => d.genre))].sort();
+  const blueShades = d3.quantize(
+    t => d3.interpolateBlues(0.3 + t * 0.6),  // range: light blue → dark blue
+    genres.length
+  );
+  const genreColor = d3.scaleOrdinal().domain(genres).range(blueShades);
+
+  // ── Dimensions ───────────────────────────────────────────
+  const container = document.getElementById("alluvial-area");
+  const W = container.clientWidth;
+  const H = container.clientHeight;
+  const margin = { top: 22, right: 90, bottom: 8, left: 110 };
+  const iW = W - margin.left - margin.right;
+  const iH = H - margin.top  - margin.bottom;
+
+  const svg = d3.select("#alluvial-area").append("svg")
+    .attr("width", W).attr("height", H);
+
+  const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const total  = valid.length;
+  const NODE_W = 10;
+  const PAD    = 3; // px gap between adjacent node bars
+
+  // ── Proportional node layout ──────────────────────────────
+  // Each node bar height = (its count / total) * available height
+  function layoutNodes(keys, countMap) {
+    const usableH = iH - PAD * (keys.length - 1);
+    let y = 0;
+    return keys.map(k => {
+      const h = ((countMap.get(k) || 0) / total) * usableH;
+      const node = { key: k, y0: y, y1: y + h };
+      y += h + PAD;
+      return node;
+    });
+  }
+
+  // Count totals for each node column
+  const genreTotal  = d3.rollup(valid, v => v.length, d => d.genre);
+  const bucketTotal = d3.rollup(valid, v => v.length, d => hoursBucket(d.hours));
+  const effectTotal = d3.rollup(valid, v => v.length, d => d.effect);
+
+  const genreNodes  = layoutNodes(genres,       genreTotal);
+  const bucketNodes = layoutNodes(HOUR_ORDER,   bucketTotal);
+  const effectNodes = layoutNodes(EFFECT_ORDER, effectTotal);
+
+  // Node lookup maps
+  const gMap = new Map(genreNodes.map(n  => [n.key, n]));
+  const bMap = new Map(bucketNodes.map(n => [n.key, n]));
+  const eMap = new Map(effectNodes.map(n => [n.key, n]));
+
+  // ── X positions of the three node columns ─────────────────
+  const xGenre  = 0;
+  const xBucket = iW / 2;
+  const xEffect = iW;
+
+  // ── Cross-flow counts ────────────────────────────────────
+  // genre → bucket counts
+  const gbFlow = d3.rollup(valid, v => v.length,
+    d => d.genre, d => hoursBucket(d.hours));
+
+  // bucket → effect counts
+  const beFlow = d3.rollup(valid, v => v.length,
+    d => hoursBucket(d.hours), d => d.effect);
+
+  // ── Cursor maps: where each ribbon starts on a node ──────
+  // (ribbons stack downward as we iterate)
+  const curGenreR  = new Map(genres.map(k       => [k, gMap.get(k).y0]));
+  const curBucketL = new Map(HOUR_ORDER.map(k   => [k, bMap.get(k).y0]));
+  const curBucketR = new Map(HOUR_ORDER.map(k   => [k, bMap.get(k).y0]));
+  const curEffectL = new Map(EFFECT_ORDER.map(k => [k, eMap.get(k).y0]));
+
+  // Height scale: pixels per respondent
+  const hFactor = (iH - PAD * (Math.max(genres.length, HOUR_ORDER.length) - 1)) / total;
+
+  // ── Genre → Bucket ribbons (monochromatic blue) ───────────
+  genres.forEach(genre => {
+    const bucketMap = gbFlow.get(genre) || new Map();
+
+    HOUR_ORDER.forEach(bucket => {
+      const count = bucketMap.get(bucket) || 0;
+      if (!count) return;
+
+      const h = count * hFactor;
+
+      // Source: right edge of genre node, advance cursor downward
+      const sy0 = curGenreR.get(genre);
+      const sy1 = sy0 + h;
+      curGenreR.set(genre, sy1);
+
+      // Target: left edge of bucket node, advance cursor downward
+      const ty0 = curBucketL.get(bucket);
+      const ty1 = ty0 + h;
+      curBucketL.set(bucket, ty1);
+
+      // Draw cubic bezier ribbon, colored by genre (blue shades)
+      g.append("path")
+        .attr("d", ribbon(xGenre + NODE_W, sy0, sy1, xBucket, ty0, ty1))
+        .attr("fill", genreColor(genre))
+        .attr("fill-opacity", 0.40)
+        .on("mouseover", event => showTip(
+          `<b>${genre}</b> → <b>${bucket}</b><br>n = ${count}`, event))
+        .on("mousemove", event => showTip(
+          `<b>${genre}</b> → <b>${bucket}</b><br>n = ${count}`, event))
+        .on("mouseout", hideTip);
+    });
+  });
+
+  // ── Bucket → Effect ribbons (effect outcome colors) ──────
+  HOUR_ORDER.forEach(bucket => {
+    const effectMap = beFlow.get(bucket) || new Map();
+
+    EFFECT_ORDER.forEach(effect => {
+      const count = effectMap.get(effect) || 0;
+      if (!count) return;
+
+      const h = count * hFactor;
+
+      const sy0 = curBucketR.get(bucket);
+      const sy1 = sy0 + h;
+      curBucketR.set(bucket, sy1);
+
+      const ty0 = curEffectL.get(effect);
+      const ty1 = ty0 + h;
+      curEffectL.set(effect, ty1);
+
+      // Draw cubic bezier ribbon, colored by effect outcome
+      g.append("path")
+        .attr("d", ribbon(xBucket + NODE_W, sy0, sy1, xEffect, ty0, ty1))
+        .attr("fill", EFFECT_COLOR[effect])
+        .attr("fill-opacity", 0.40)
+        .on("mouseover", event => showTip(
+          `<b>${bucket}</b> → <b>${effect}</b><br>n = ${count}`, event))
+        .on("mousemove", event => showTip(
+          `<b>${bucket}</b> → <b>${effect}</b><br>n = ${count}`, event))
+        .on("mouseout", hideTip);
+    });
+  });
+
+  // ── Genre nodes (left column) ─────────────────────────────
+  genreNodes.forEach(n => {
+    g.append("rect")
+      .attr("x", xGenre).attr("y", n.y0)
+      .attr("width", NODE_W)
+      .attr("height", Math.max(n.y1 - n.y0, 1))
+      .attr("fill", genreColor(n.key)).attr("rx", 2);
+
+    // Genre label to the left
+    g.append("text")
+      .attr("x", xGenre - 4).attr("y", (n.y0 + n.y1) / 2)
+      .attr("text-anchor", "end").attr("dominant-baseline", "middle")
+      .attr("font-size", 8.5).attr("fill", "#555")
+      .attr("font-family", "Arial, sans-serif")
+      .text(n.key);
+  });
+
+  // ── Bucket nodes (middle column) ──────────────────────────
+  bucketNodes.forEach(n => {
+    const h = Math.max(n.y1 - n.y0, 1);
+
+    g.append("rect")
+      .attr("x", xBucket).attr("y", n.y0)
+      .attr("width", NODE_W).attr("height", h)
+      .attr("fill", "#888").attr("rx", 2);
+
+    // Label inside the node if tall enough
+    if (h > 10) {
+      g.append("text")
+        .attr("x", xBucket + NODE_W / 2).attr("y", (n.y0 + n.y1) / 2)
+        .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+        .attr("font-size", 7.5).attr("fill", "#fff")
+        .attr("font-family", "Arial, sans-serif")
+        .text(n.key);
+    }
+  });
+
+  // ── Effect nodes (right column) ───────────────────────────
+  effectNodes.forEach(n => {
+    const h = Math.max(n.y1 - n.y0, 1);
+
+    g.append("rect")
+      .attr("x", xEffect).attr("y", n.y0)
+      .attr("width", NODE_W).attr("height", h)
+      .attr("fill", EFFECT_COLOR[n.key]).attr("rx", 2);
+
+    // Effect label to the right
+    g.append("text")
+      .attr("x", xEffect + NODE_W + 5).attr("y", (n.y0 + n.y1) / 2)
+      .attr("text-anchor", "start").attr("dominant-baseline", "middle")
+      .attr("font-size", 9.5).attr("fill", EFFECT_COLOR[n.key])
+      .attr("font-family", "Arial, sans-serif").attr("font-weight", "bold")
+      .text(n.key);
+  });
+
+  // ── Column header labels ──────────────────────────────────
+  [
+    { label: "GENRE",        x: xGenre  + NODE_W / 2 },
+    { label: "DAILY HOURS",  x: xBucket + NODE_W / 2 },
+    { label: "MUSIC EFFECT", x: xEffect + NODE_W / 2 },
+  ].forEach(({ label, x }) => {
+    g.append("text")
+      .attr("x", x).attr("y", -8)
+      .attr("text-anchor", "middle")
+      .attr("font-size", 8.5).attr("fill", "#888")
+      .attr("font-family", "Arial, sans-serif")
+      .attr("letter-spacing", "0.07em")
+      .text(label);
+  });
+
+  // ── Alluvial legend ───────────────────────────────────────
+  // Show what blue shades mean and what effect colors mean
+  const lx = iW + 14;
+  const lg = g.append("g").attr("transform", `translate(${lx}, 0)`);
+}
+
+// ── Cubic bezier ribbon path helper ──────────────────────────
+// Draws a filled band flowing from (x0, sy0→sy1) to (x1, ty0→ty1)
+function ribbon(x0, sy0, sy1, x1, ty0, ty1) {
+  const mx = (x0 + x1) / 2;
+  return `M${x0},${sy0} C${mx},${sy0} ${mx},${ty0} ${x1},${ty0}
+          L${x1},${ty1} C${mx},${ty1} ${mx},${sy1} ${x0},${sy1} Z`;
+}
