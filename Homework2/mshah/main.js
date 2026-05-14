@@ -18,8 +18,7 @@ d3.csv("data/music_mental_health_survey_results.csv", d => {  //  Load CSV
   const genre      = d["Fav genre"]?.trim();
   const effect     = d["Music effects"]?.trim();
 
-  // Drop rows with missing essential fields
-  if (!genre || isNaN(hours) || isNaN(anxiety) || isNaN(depression)) return null;
+  if (!genre || isNaN(hours) || isNaN(anxiety) || isNaN(depression)) return null;  // remove missing data
 
   return { hours, anxiety, depression, genre, effect };
 
@@ -30,12 +29,7 @@ d3.csv("data/music_mental_health_survey_results.csv", d => {  //  Load CSV
   drawScatter(data);
 });
 
-// =============================================================
-//  VIEW 1 – BAR CHART  (overview)
-//  Average depression score per favorite genre.
-//  Simple and readable — gives the audience an at-a-glance
-//  summary of which genres correlate with higher depression.
-// =============================================================
+//  VIEW 1: BAR CHART (Average depression score per favorite genre)
 function drawBarChart(data) {
   const container = document.getElementById("bar-area");
   const W = container.clientWidth;
@@ -47,43 +41,34 @@ function drawBarChart(data) {
   const svg = d3.select("#bar-area").append("svg")
     .attr("width", W).attr("height", H);
 
-  // Main drawing group offset by margins
-  const g = svg.append("g")
+  const g = svg.append("g")  
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-  // ── Compute average depression per genre ──────────────────
-  const genres = [...new Set(data.map(d => d.genre))].sort();
+  const genres = [...new Set(data.map(d => d.genre))].sort();  //computing average depression per genre
 
-  // rollup: genre → mean depression score
-  const avgMap = d3.rollup(
+  const avgMap = d3.rollup(  //match genre to svg depression score
     data,
     v => d3.mean(v, d => d.depression),
     d => d.genre
   );
 
-  // Sort genres by average depression descending so bars rank clearly
-  const sorted = genres.sort((a, b) => avgMap.get(b) - avgMap.get(a));
+  const sorted = genres.sort((a, b) => avgMap.get(b) - avgMap.get(a));  //sort descending order
 
-  // ── Scales ───────────────────────────────────────────────
-  // X: one band per genre
-  const xScale = d3.scaleBand()
+  const xScale = d3.scaleBand()  // X scale
     .domain(sorted)
     .range([0, iW])
     .padding(0.28);
 
-  // Y: 0 to slightly above the max average (leave headroom)
-  const yMax = d3.max([...avgMap.values()]);
+  const yMax = d3.max([...avgMap.values()]);  // Y scale
   const yScale = d3.scaleLinear()
     .domain([0, Math.ceil(yMax) + 0.5])
     .range([iH, 0]);
 
-  // ── Horizontal grid lines ─────────────────────────────────
-  g.append("g").attr("class", "grid")
+  g.append("g").attr("class", "grid")  // horizontal grid lines
     .call(d3.axisLeft(yScale).tickSize(-iW).tickFormat(""))
     .call(ax => ax.select(".domain").remove());
 
-  // ── X axis with rotated genre labels ─────────────────────
-  g.append("g").attr("class", "axis")
+  g.append("g").attr("class", "axis")  // x axis
     .attr("transform", `translate(0,${iH})`)
     .call(d3.axisBottom(xScale).tickSize(0))
     .call(ax => ax.select(".domain").remove())
@@ -93,28 +78,22 @@ function drawBarChart(data) {
       .attr("dy", "0.35em")
       .attr("dx", "-0.4em");
 
-  // ── Y axis ────────────────────────────────────────────────
-  g.append("g").attr("class", "axis")
+  g.append("g").attr("class", "axis")  // y axis
     .call(d3.axisLeft(yScale).ticks(5))
     .call(ax => ax.select(".domain").remove());
-
-  // ── Y axis label ─────────────────────────────────────────
-  g.append("text").attr("class", "axis-label")
+  g.append("text").attr("class", "axis-label")  // label y axis
     .attr("transform", "rotate(-90)")
     .attr("x", -iH / 2)
     .attr("y", -40)
     .attr("text-anchor", "middle")
     .text("Avg. Depression Score (0–10)");
 
-  // ── Bars ─────────────────────────────────────────────────
-  // Single blue color for all bars — clean, unambiguous encoding
-  const BAR_COLOR = "#1FCC23";
+  const BAR_COLOR = "#1FCC23";  // the bars
 
   sorted.forEach(genre => {
     const avg = avgMap.get(genre);
 
-    // Bar rectangle
-    g.append("rect")
+    g.append("rect")  // bar shape
       .attr("x", xScale(genre))
       .attr("y", yScale(avg))
       .attr("width", xScale.bandwidth())
@@ -128,8 +107,7 @@ function drawBarChart(data) {
         `<b>${genre}</b><br>Avg Depression: ${avg.toFixed(2)}`, event))
       .on("mouseout", hideTip);
 
-    // Value label above bar
-    g.append("text")
+    g.append("text")  // values of each bar
       .attr("x", xScale(genre) + xScale.bandwidth() / 2)
       .attr("y", yScale(avg) - 3)
       .attr("text-anchor", "middle")
@@ -139,13 +117,10 @@ function drawBarChart(data) {
       .text(avg.toFixed(1));
   });
 
-  // ── Legend ───────────────────────────────────────────────
-  const lx = iW - 120;
+  const lx = iW - 120;  // legend
   const ly = 0;
-
   const lg = g.append("g").attr("transform", `translate(${lx},${ly})`);
 
-  // Colored bar swatch
   lg.append("rect")
     .attr("width", 14).attr("height", 10)
     .attr("fill", BAR_COLOR).attr("fill-opacity", 0.75).attr("rx", 2);
@@ -157,8 +132,7 @@ function drawBarChart(data) {
     .text("Avg. Depression Score");
 }
 
-//  VIEW 2 – ALLUVIAL DIAGRAM  (advanced)
-//  Flows: Genre → Daily Hours bucket → Music Effect
+//  VIEW 2: Alluvial Diagram  (Genre → Daily Listening Hours → Music Effect)
 function drawAlluvial(data) {
   const valid = data.filter(d =>
     d.effect === "Improve" || d.effect === "No effect" || d.effect === "Worsen"
@@ -174,24 +148,20 @@ function drawAlluvial(data) {
   const HOUR_ORDER   = ["< 2 hrs", "2–4 hrs", "4–6 hrs", "6–8 hrs", "8+ hrs"];
   const EFFECT_ORDER = ["Improve", "No effect", "Worsen"];
 
-  // Effect outcome colors (categorical: good / neutral / bad)
-  const EFFECT_COLOR = {
+  const EFFECT_COLOR = {  // effect outcome colors
     "Improve":   "#10E81C",
     "No effect": "#aaa",
     "Worsen":    "#FF0000",
   };
 
-  // Genre → Hours ribbon color: monochromatic blue shades
-  // We map each genre to a shade of blue by index
-  const genres = [...new Set(valid.map(d => d.genre))].sort();
+  const genres = [...new Set(valid.map(d => d.genre))].sort();  // genre to daily listening hours color
   const blueShades = d3.quantize(
-    t => d3.interpolateBlues(0.3 + t * 0.6),  // range: light blue → dark blue
+    t => d3.interpolateBlues(0.3 + t * 0.6),  // shades
     genres.length
   );
   const genreColor = d3.scaleOrdinal().domain(genres).range(blueShades);
 
-  // ── Dimensions ───────────────────────────────────────────
-  const container = document.getElementById("alluvial-area");
+  const container = document.getElementById("alluvial-area");  // dimensions
   const W = container.clientWidth;
   const H = container.clientHeight;
   const margin = { top: 22, right: 90, bottom: 8, left: 110 };
